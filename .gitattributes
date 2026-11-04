@@ -1,0 +1,3 @@
+# Normalize line endings: store LF in the repository and check out LF so the
+# build (Docker/Alpine, Go, Vite) and every contributor see identical files.
+* text=auto eol=lf
