@@ -1,0 +1,13 @@
+.git
+.gitignore
+**/node_modules
+frontend/dist
+backend/web
+backend/drydock
+backend/drydock.exe
+data
+*.db
+*.db-wal
+*.db-shm
+.env
+*.log

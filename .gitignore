@@ -1,0 +1,22 @@
+# Build output
+/backend/web/
+/backend/drydock
+/backend/drydock.exe
+
+# Runtime data & secrets
+/data/
+*.db
+*.db-wal
+*.db-shm
+.env
+
+# Node / TypeScript
+/frontend/node_modules/
+/frontend/dist/
+*.tsbuildinfo
+
+# Editors & OS
+.DS_Store
+.idea/
+.vscode/
+*.log
