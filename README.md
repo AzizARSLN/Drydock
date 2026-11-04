@@ -40,7 +40,7 @@ improvisation into a repeatable, reviewable workflow behind a single login:
 | --- | --- |
 | **Nginx** | Browse sites, edit `server` blocks in a code editor, validate (`nginx -t`), enable/disable, reload |
 | **TLS / SSL** | List certificates with issuer and expiry, flag certs expiring soon, renew via Certbot |
-| **Applications** | Discover Docker containers and systemd units, start / stop / restart / reload, update images |
+| **Applications** | Group containers by compose project folder, discover compose directories on disk, start / stop / restart / reload, update images, view `logs` / `ps`, and **deploy a new app** from a pasted `docker-compose.yml` |
 | **Ports** | Inspect listening sockets, change a site's `listen` port and update the proxy targets |
 | **Files** | Dual-pane explorer with an in-browser editor, upload, download, rename, mkdir, delete |
 | **Terminal** | Full interactive `xterm.js` shell over a WebSocket-tunnelled SSH session |
@@ -228,6 +228,9 @@ Every route is JSON over HTTP. Authentication is via the session cookie or a
 | `GET` | `/api/servers/{id}/services` | any | Docker containers and systemd units |
 | `POST` | `/api/servers/{id}/services/action` | operator | start / stop / restart / reload |
 | `POST` | `/api/servers/{id}/services/update` | operator | Pull a new image / update a package |
+| `GET` | `/api/servers/{id}/compose` | any | Compose project folders discovered on disk |
+| `POST` | `/api/servers/{id}/services/compose` | operator | Run a project-level `docker compose` command (up / restart / down / logs / ps) |
+| `POST` | `/api/servers/{id}/apps/deploy` | operator | Deploy a new app from a compose file (folder, compose, stack up, nginx vhost) |
 | `GET` | `/api/servers/{id}/ports` | any | Listening sockets |
 | `POST` | `/api/servers/{id}/ports/change` | operator | Change a site's listening port |
 | `GET` | `/api/servers/{id}/files` | any | Directory listing |
@@ -342,6 +345,14 @@ docker compose up -d --build
 Ardından <http://127.0.0.1:8788/> adresini açıp ilk yönetici hesabını
 oluşturun. Drydock'u internete doğrudan açmayın; TLS sonlandıran bir ters
 vekil (reverse proxy) arkasında ve tercihen yalnızca yerel/özel ağda çalıştırın.
+
+## Topics
+
+`self-hosted` · `server-management` · `control-panel` · `devops` · `sysadmin` ·
+`infrastructure` · `fleet-management` · `ssh` · `linux` · `nginx` ·
+`reverse-proxy` · `docker` · `docker-compose` · `systemd` · `deploy` · `tls` ·
+`ssl` · `certbot` · `golang` · `react` · `typescript` · `web-terminal` ·
+`audit-log` · `agentless` · `dry-run` · `rollback`
 
 ## License
 
