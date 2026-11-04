@@ -31,6 +31,14 @@ interface ComposeGroup {
   items: Service[]
 }
 
+// ViewerState backs the read-only output modal used for `logs` and `ps`.
+interface ViewerState {
+  group: ComposeGroup
+  act: 'logs' | 'ps'
+  title: string
+  text: string
+}
+
 export default function AppsTab({ serverId, canWrite }: TabProps) {
   const { t } = useI18n()
   const dry = useDryRun()
@@ -44,6 +52,8 @@ export default function AppsTab({ serverId, canWrite }: TabProps) {
   const [update, setUpdate] = useState<Service | null>(null)
   const [deploy, setDeploy] = useState(false)
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
+  const [viewer, setViewer] = useState<ViewerState | null>(null)
+  const [viewing, setViewing] = useState(false)
 
   const toggleGroup = (key: string) =>
     setCollapsed((prev) => {
@@ -146,6 +156,24 @@ export default function AppsTab({ serverId, canWrite }: TabProps) {
     })
   }
 
+  // Read-only commands (logs / ps) are not mutations: run them directly and
+  // render the raw output in a viewer instead of the dry-run apply flow, which
+  // would discard the output.
+  const openViewer = async (group: ComposeGroup, act: 'logs' | 'ps') => {
+    const title = `${group.name} — docker compose ${act}`
+    setViewer({ group, act, title, text: '' })
+    setViewing(true)
+    try {
+      const o = await api.composeAction(serverId, group.dir, group.file, act, false)
+      setViewer((v) => (v ? { ...v, text: o.output || o.message } : v))
+    } catch (e) {
+      const msg = e instanceof ApiError ? e.message : String(e)
+      setViewer((v) => (v ? { ...v, text: msg } : v))
+    } finally {
+      setViewing(false)
+    }
+  }
+
   const runDeploy = (inp: DeployAppInput) => {
     dry.preview({
       title: `${t('apps.deploy')} — ${inp.name}`,
@@ -239,6 +267,19 @@ export default function AppsTab({ serverId, canWrite }: TabProps) {
             </button>
           ))}
         </div>
+        {view === 'project' && groups.length > 0 ? (
+          <>
+            <button className="btn btn-sm btn-ghost" onClick={() => setCollapsed(new Set())}>
+              {t('apps.expandAll')}
+            </button>
+            <button
+              className="btn btn-sm btn-ghost"
+              onClick={() => setCollapsed(new Set(groups.map((g) => g.key)))}
+            >
+              {t('apps.collapseAll')}
+            </button>
+          </>
+        ) : null}
         <input
           className="input"
           style={{ maxWidth: 240 }}
@@ -306,10 +347,10 @@ export default function AppsTab({ serverId, canWrite }: TabProps) {
                   >
                     {t('apps.composeRestart')}
                   </button>
-                  <button className="btn btn-xs" onClick={() => projectAction(g, 'logs')} disabled={!g.dir}>
+                  <button className="btn btn-xs" onClick={() => void openViewer(g, 'logs')} disabled={!g.dir}>
                     {t('apps.logs')}
                   </button>
-                  <button className="btn btn-xs" onClick={() => projectAction(g, 'ps')} disabled={!g.dir}>
+                  <button className="btn btn-xs" onClick={() => void openViewer(g, 'ps')} disabled={!g.dir}>
                     {t('apps.ps')}
                   </button>
                   <button
@@ -359,6 +400,36 @@ export default function AppsTab({ serverId, canWrite }: TabProps) {
       ) : null}
 
       {deploy ? <DeployModal onClose={() => setDeploy(false)} onConfirm={runDeploy} /> : null}
+
+      {viewer ? (
+        <Modal
+          wide
+          title={viewer.title}
+          onClose={() => setViewer(null)}
+          footer={
+            <>
+              <button className="btn" onClick={() => setViewer(null)}>
+                {t('common.close')}
+              </button>
+              <button
+                className="btn btn-primary"
+                onClick={() => void openViewer(viewer.group, viewer.act)}
+                disabled={viewing}
+              >
+                {viewing ? <Spinner /> : null} {t('common.refresh')}
+              </button>
+            </>
+          }
+        >
+          {viewing && !viewer.text ? (
+            <Loading label={t('apps.running')} />
+          ) : (
+            <pre className="code" style={{ maxHeight: 520, minHeight: 220 }}>
+              {viewer.text || t('apps.noOutput')}
+            </pre>
+          )}
+        </Modal>
+      ) : null}
 
       {dry.modal}
     </>
