@@ -4,6 +4,7 @@ import { ApiError } from '../api'
 import { useAuth } from '../context/auth'
 import { useI18n } from '../i18n'
 import type { Lang } from '../i18n'
+import { ThemeToggle } from '../components/ThemeToggle'
 import { Alert } from '../components/ui'
 
 export default function Login() {
@@ -43,17 +44,20 @@ export default function Login() {
     <div className="auth-page">
       <div className="auth-bg" />
       <form className="auth-card" onSubmit={submit}>
-        <div className="auth-lang">
-          {(['tr', 'en'] as Lang[]).map((l) => (
-            <button
-              key={l}
-              type="button"
-              className={`lang-pill${lang === l ? ' active' : ''}`}
-              onClick={() => setLang(l)}
-            >
-              {l === 'tr' ? 'Türkçe' : 'English'}
-            </button>
-          ))}
+        <div className="auth-tools">
+          <div className="auth-lang">
+            {(['tr', 'en'] as Lang[]).map((l) => (
+              <button
+                key={l}
+                type="button"
+                className={`lang-pill${lang === l ? ' active' : ''}`}
+                onClick={() => setLang(l)}
+              >
+                {l === 'tr' ? 'Türkçe' : 'English'}
+              </button>
+            ))}
+          </div>
+          <ThemeToggle className="btn btn-ghost btn-icon" />
         </div>
 
         <div className="auth-head">

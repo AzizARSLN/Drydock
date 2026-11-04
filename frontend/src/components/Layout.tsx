@@ -5,6 +5,7 @@ import { useAuth } from '../context/auth'
 import { useToast } from '../context/toast'
 import { useI18n, type Key, type Lang } from '../i18n'
 import { Modal } from './Modal'
+import { ThemeToggle } from './ThemeToggle'
 import { Alert, Badge } from './ui'
 
 type IconName = 'dashboard' | 'users' | 'audit' | 'logout' | 'collapse'
@@ -135,6 +136,7 @@ export default function Layout() {
             <strong>{crumb()}</strong>
           </div>
           <div className="spacer" />
+          <ThemeToggle />
           <div className="toggle">
             {(['tr', 'en'] as Lang[]).map((l) => (
               <button key={l} className={lang === l ? 'active' : ''} onClick={() => setLang(l)}>

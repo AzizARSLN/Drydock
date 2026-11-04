@@ -42,6 +42,8 @@ const dict = {
     'nav.logout': 'Çıkış',
     'nav.password': 'Şifre Değiştir',
     'nav.language': 'Dil',
+    'theme.light': 'Açık temaya geç',
+    'theme.dark': 'Koyu temaya geç',
 
     'login.title': 'Drydock',
     'login.subtitle': 'Sunucu operasyon konsolu',
@@ -294,6 +296,8 @@ const dict = {
     'nav.logout': 'Sign out',
     'nav.password': 'Change password',
     'nav.language': 'Language',
+    'theme.light': 'Switch to light theme',
+    'theme.dark': 'Switch to dark theme',
 
     'login.title': 'Drydock',
     'login.subtitle': 'Server operations console',
