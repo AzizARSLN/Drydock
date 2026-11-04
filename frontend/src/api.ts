@@ -97,6 +97,20 @@ export interface ComposeProject {
   file: string
 }
 
+// DeployAppInput provisions a new application from a pasted compose file, with
+// an optional nginx reverse proxy in front of the published port.
+export interface DeployAppInput {
+  name: string
+  root: string
+  compose: string
+  env?: string
+  nginx: boolean
+  server_name?: string
+  upstream_port?: number
+  cert_path?: string
+  key_path?: string
+}
+
 export interface ListeningPort {
   proto: string
   address: string
@@ -241,6 +255,8 @@ export const api = {
   services: (id: number, kind: string, filter: string) =>
     request<Service[]>('GET', `/api/servers/${id}/services?kind=${enc(kind)}&filter=${enc(filter)}`),
   composeProjects: (id: number) => request<ComposeProject[]>('GET', `/api/servers/${id}/compose`),
+  deployApp: (id: number, inp: DeployAppInput, dry_run: boolean) =>
+    request<Outcome>('POST', `/api/servers/${id}/apps/deploy`, { ...inp, dry_run }),
   serviceAction: (id: number, kind: string, name: string, action: string, dry_run: boolean) =>
     request<Outcome>('POST', `/api/servers/${id}/services/action`, { kind, name, action, dry_run }),
   serviceUpdate: (id: number, kind: string, name: string, image: string, compose_file: string, dry_run: boolean) =>

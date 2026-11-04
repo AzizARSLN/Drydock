@@ -4,9 +4,12 @@ import (
 	"context"
 	"fmt"
 	"path"
+	"regexp"
 	"sort"
 	"strings"
 
+	"github.com/AzizARSLN/drydock/internal/app"
+	"github.com/AzizARSLN/drydock/internal/models"
 	"github.com/AzizARSLN/drydock/internal/sshx"
 )
 
@@ -366,4 +369,227 @@ func ListComposeProjects(ctx context.Context, c *sshx.Client) ([]ComposeProject,
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Dir < out[j].Dir })
 	return out, nil
+}
+
+// DeployRequest is a new application assembled from a pasted compose file. The
+// optional nginx block wires a reverse proxy in front of the published port.
+type DeployRequest struct {
+	Name         string `json:"name"`
+	Root         string `json:"root"`
+	Compose      string `json:"compose"`
+	Env          string `json:"env,omitempty"`
+	Nginx        bool   `json:"nginx"`
+	ServerName   string `json:"server_name,omitempty"`
+	UpstreamPort int    `json:"upstream_port,omitempty"`
+	CertPath     string `json:"cert_path,omitempty"`
+	KeyPath      string `json:"key_path,omitempty"`
+	DryRun       bool   `json:"dry_run"`
+}
+
+// reProjectName restricts project folder names to a safe, predictable set.
+var reProjectName = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]*$`)
+
+// deployPlan is the validated, scope-guarded set of paths a deployment touches.
+type deployPlan struct {
+	dir         string
+	composeFile string
+	envFile     string
+	nginxSite   string
+	nginxLink   string
+}
+
+// DeployApp creates the project folder, writes the compose (and optional .env)
+// file, brings the stack up and, when requested, installs and enables an nginx
+// reverse-proxy vhost with validate-and-rollback safety.
+func DeployApp(ctx context.Context, a *app.App, c *sshx.Client, sv *models.Server,
+	operator string, in DeployRequest) (*Outcome, error) {
+
+	plan, err := planDeploy(in)
+	if err != nil {
+		return nil, err
+	}
+
+	env := strings.TrimSpace(in.Env)
+	commands := []string{
+		"mkdir -p " + shellQuote(plan.dir),
+		"cat > " + plan.composeFile + "  # docker-compose.yml",
+	}
+	if env != "" {
+		commands = append(commands, "cat > "+plan.envFile+"  # .env")
+	}
+	commands = append(commands,
+		fmt.Sprintf("cd %s && docker compose pull && docker compose up -d", shellQuote(plan.dir)))
+	if in.Nginx {
+		commands = append(commands,
+			"cat > "+plan.nginxSite+"  # nginx vhost",
+			fmt.Sprintf("ln -sfn %s %s && nginx -t && (systemctl reload nginx || nginx -s reload)",
+				shellQuote(plan.nginxSite), shellQuote(plan.nginxLink)))
+	}
+
+	out := &Outcome{DryRun: in.DryRun, Commands: commands}
+	if in.DryRun {
+		out.Message = fmt.Sprintf("Dry-run: %s dizininde %d adımlı kurulum planlandı.", plan.dir, len(commands))
+		if in.Nginx {
+			out.Output = renderVhost(in)
+		}
+		return out, nil
+	}
+
+	var log strings.Builder
+	run := func(desc, cmd string) error {
+		res, err := c.RunSudo(ctx, cmd)
+		if err != nil {
+			return err
+		}
+		log.WriteString("$ " + cmd + "\n" + res.Stdout + res.Stderr + "\n")
+		if !res.OK() {
+			return fmt.Errorf("%s başarısız: %s", desc, strings.TrimSpace(res.Stderr+res.Stdout))
+		}
+		return nil
+	}
+
+	if err := run("klasör oluşturma", "mkdir -p "+shellQuote(plan.dir)); err != nil {
+		out.Output = log.String()
+		return out, err
+	}
+	if err := c.WriteFile(ctx, plan.composeFile, in.Compose); err != nil {
+		out.Output = log.String()
+		return out, fmt.Errorf("docker-compose.yml yazılamadı: %w", err)
+	}
+	log.WriteString("$ cat > " + plan.composeFile + "  # docker-compose.yml\n")
+	if env != "" {
+		if err := c.WriteFile(ctx, plan.envFile, in.Env); err != nil {
+			out.Output = log.String()
+			return out, fmt.Errorf(".env yazılamadı: %w", err)
+		}
+		log.WriteString("$ cat > " + plan.envFile + "  # .env\n")
+	}
+
+	if err := run("docker compose up",
+		fmt.Sprintf("cd %s && docker compose pull && docker compose up -d", shellQuote(plan.dir))); err != nil {
+		out.Output = log.String()
+		return out, err
+	}
+
+	if in.Nginx {
+		if err := applyVhost(ctx, a, c, sv, operator, plan, in, &log, out); err != nil {
+			out.Output = log.String()
+			return out, err
+		}
+	}
+
+	out.Output = log.String()
+	out.Message = fmt.Sprintf("%s kuruldu ve çalıştırıldı.", in.Name)
+	return out, nil
+}
+
+// applyVhost writes and enables the nginx vhost, rolling back to the previous
+// state when validation or reload fails.
+func applyVhost(ctx context.Context, a *app.App, c *sshx.Client, sv *models.Server, operator string,
+	plan *deployPlan, in DeployRequest, log *strings.Builder, out *Outcome) error {
+
+	existed := c.FileExists(ctx, plan.nginxSite)
+	before := ""
+	if existed {
+		before, _ = c.ReadFile(ctx, plan.nginxSite)
+		snap := &models.Snapshot{ServerID: sv.ID, Kind: "nginx", Path: plan.nginxSite, Content: before,
+			Note: "uygulama kurulumu öncesi nginx yedeği", CreatedBy: operator}
+		if err := a.Store.SaveSnapshot(snap); err == nil {
+			out.Backup = fmt.Sprintf("#%d", snap.ID)
+		}
+	}
+
+	if err := c.WriteFile(ctx, plan.nginxSite, renderVhost(in)); err != nil {
+		return fmt.Errorf("nginx vhost yazılamadı: %w", err)
+	}
+	log.WriteString("$ cat > " + plan.nginxSite + "  # nginx vhost\n")
+
+	cmd := fmt.Sprintf("ln -sfn %s %s && nginx -t && (systemctl reload nginx || nginx -s reload)",
+		shellQuote(plan.nginxSite), shellQuote(plan.nginxLink))
+	res, err := c.RunSudo(ctx, cmd)
+	if err != nil {
+		return err
+	}
+	log.WriteString("$ " + cmd + "\n" + res.Stdout + res.Stderr + "\n")
+	if !res.OK() {
+		// Roll back so a broken vhost never reaches production.
+		if existed {
+			_ = c.WriteFile(ctx, plan.nginxSite, before)
+		} else {
+			_, _ = c.RunSudo(ctx, fmt.Sprintf("rm -f %s %s", shellQuote(plan.nginxSite), shellQuote(plan.nginxLink)))
+		}
+		out.Message = "Nginx doğrulaması başarısız; nginx değişiklikleri geri alındı."
+		return fmt.Errorf("nginx -t failed: %s", strings.TrimSpace(res.Stderr+res.Stdout))
+	}
+	return nil
+}
+
+// planDeploy validates the request and returns the guarded paths to operate on.
+func planDeploy(in DeployRequest) (*deployPlan, error) {
+	name := strings.TrimSpace(in.Name)
+	if !reProjectName.MatchString(name) {
+		return nil, fmt.Errorf("geçersiz uygulama adı: yalnızca harf, rakam, nokta, tire ve alt çizgi kullanın")
+	}
+	if strings.TrimSpace(in.Compose) == "" {
+		return nil, fmt.Errorf("docker-compose içeriği boş olamaz")
+	}
+	root, err := GuardPath(strings.TrimSpace(in.Root), DefaultFSScope)
+	if err != nil {
+		return nil, err
+	}
+	dir, err := GuardPath(path.Join(root, name), DefaultFSScope)
+	if err != nil {
+		return nil, err
+	}
+
+	plan := &deployPlan{
+		dir:         dir,
+		composeFile: dir + "/docker-compose.yml",
+		envFile:     dir + "/.env",
+		nginxSite:   nginxSitesAvailable + "/" + name + ".conf",
+		nginxLink:   nginxSitesEnabled + "/" + name + ".conf",
+	}
+	if in.Nginx {
+		if strings.TrimSpace(in.ServerName) == "" {
+			return nil, fmt.Errorf("nginx için alan adı (server_name) gerekli")
+		}
+		if in.UpstreamPort < 1 || in.UpstreamPort > 65535 {
+			return nil, fmt.Errorf("geçersiz upstream portu (1-65535)")
+		}
+		if (in.CertPath == "") != (in.KeyPath == "") {
+			return nil, fmt.Errorf("SSL için hem sertifika hem anahtar yolu girilmeli")
+		}
+		if _, err := GuardPath(plan.nginxSite, NginxScope); err != nil {
+			return nil, err
+		}
+	}
+	return plan, nil
+}
+
+// renderVhost builds the reverse-proxy server block for the new application.
+func renderVhost(in DeployRequest) string {
+	tls := in.CertPath != "" && in.KeyPath != ""
+	var b strings.Builder
+	b.WriteString("server {\n")
+	if tls {
+		b.WriteString("    listen 443 ssl http2;\n")
+	} else {
+		b.WriteString("    listen 80;\n")
+	}
+	b.WriteString("    server_name " + strings.Join(strings.Fields(in.ServerName), " ") + ";\n\n")
+	if tls {
+		b.WriteString("    ssl_certificate " + strings.TrimSpace(in.CertPath) + ";\n")
+		b.WriteString("    ssl_certificate_key " + strings.TrimSpace(in.KeyPath) + ";\n\n")
+	}
+	b.WriteString("    location / {\n")
+	fmt.Fprintf(&b, "        proxy_pass http://127.0.0.1:%d;\n", in.UpstreamPort)
+	b.WriteString("        proxy_http_version 1.1;\n")
+	b.WriteString("        proxy_set_header Host $host;\n")
+	b.WriteString("        proxy_set_header X-Real-IP $remote_addr;\n")
+	b.WriteString("        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;\n")
+	b.WriteString("        proxy_set_header X-Forwarded-Proto $scheme;\n")
+	b.WriteString("        proxy_set_header Upgrade $http_upgrade;\n")
+	b.WriteString("        proxy_set_header Connection \"upgrade\";\n")
+	b.WriteString("    }\n}\n")
+	return b.String()
 }

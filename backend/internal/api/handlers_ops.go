@@ -330,6 +330,31 @@ func (s *Server) handleComposeProjects(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, projects)
 }
 
+// handleDeployApp provisions a new application from a pasted compose file:
+// folder, compose (+ .env), docker compose up and an optional nginx vhost.
+func (s *Server) handleDeployApp(w http.ResponseWriter, r *http.Request) {
+	var in modules.DeployRequest
+	if err := decode(r, &in); err != nil {
+		fail(w, http.StatusBadRequest, "geçersiz istek gövdesi")
+		return
+	}
+	client, sv, ctx, cancel, ok := s.dial(w, r, 600*time.Second)
+	if !ok {
+		return
+	}
+	defer cancel()
+	defer client.Close()
+
+	out, err := modules.DeployApp(ctx, s.App, client, sv, actor(r).Username, in)
+	if err != nil {
+		s.audit(r, sv.ID, sv.Name, "app-deploy", in.Name, err.Error(), audit.StatusError)
+		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"error": err.Error(), "outcome": out})
+		return
+	}
+	s.audit(r, sv.ID, sv.Name, "app-deploy", in.Name, out.Message, statusFor(in.DryRun))
+	writeJSON(w, http.StatusOK, out)
+}
+
 // handleComposeAction runs a project-level docker compose command in the
 // project's root directory (pull / up -d / restart / down / ps / logs).
 func (s *Server) handleComposeAction(w http.ResponseWriter, r *http.Request) {
