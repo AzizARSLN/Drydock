@@ -312,6 +312,24 @@ func (s *Server) handleServiceUpdate(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, out)
 }
 
+// handleComposeProjects scans the host for compose project folders so the UI
+// can group containers by folder even when compose labels are missing.
+func (s *Server) handleComposeProjects(w http.ResponseWriter, r *http.Request) {
+	client, _, ctx, cancel, ok := s.dial(w, r, 90*time.Second)
+	if !ok {
+		return
+	}
+	defer cancel()
+	defer client.Close()
+
+	projects, err := modules.ListComposeProjects(ctx, client)
+	if err != nil {
+		fail(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, projects)
+}
+
 // handleComposeAction runs a project-level docker compose command in the
 // project's root directory (pull / up -d / restart / down / ps / logs).
 func (s *Server) handleComposeAction(w http.ResponseWriter, r *http.Request) {

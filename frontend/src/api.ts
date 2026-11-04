@@ -89,6 +89,14 @@ export interface Service {
   compose_file?: string
 }
 
+// A compose project folder discovered by scanning the host, whether or not its
+// containers are running.
+export interface ComposeProject {
+  name: string
+  dir: string
+  file: string
+}
+
 export interface ListeningPort {
   proto: string
   address: string
@@ -232,6 +240,7 @@ export const api = {
 
   services: (id: number, kind: string, filter: string) =>
     request<Service[]>('GET', `/api/servers/${id}/services?kind=${enc(kind)}&filter=${enc(filter)}`),
+  composeProjects: (id: number) => request<ComposeProject[]>('GET', `/api/servers/${id}/compose`),
   serviceAction: (id: number, kind: string, name: string, action: string, dry_run: boolean) =>
     request<Outcome>('POST', `/api/servers/${id}/services/action`, { kind, name, action, dry_run }),
   serviceUpdate: (id: number, kind: string, name: string, image: string, compose_file: string, dry_run: boolean) =>

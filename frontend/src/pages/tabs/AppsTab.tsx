@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { api, ApiError, type Service } from '../../api'
+import { api, ApiError, type ComposeProject, type Service } from '../../api'
 import { useDryRun } from '../../components/DryRun'
 import { Modal } from '../../components/Modal'
 import { Alert, Badge, Empty, Loading, Spinner } from '../../components/ui'
@@ -16,10 +16,18 @@ function composePath(detail: string): string {
   return m ? m[1] : ''
 }
 
+// baseName returns the last path segment, i.e. the project folder name.
+function baseName(dir: string): string {
+  const parts = dir.split('/').filter(Boolean)
+  return parts.length ? parts[parts.length - 1] : dir
+}
+
 interface ComposeGroup {
+  key: string
   name: string
   dir: string
   file: string
+  project?: string
   items: Service[]
 }
 
@@ -30,6 +38,7 @@ export default function AppsTab({ serverId, canWrite }: TabProps) {
   const [view, setView] = useState<View>('project')
   const [filter, setFilter] = useState('')
   const [services, setServices] = useState<Service[] | null>(null)
+  const [projects, setProjects] = useState<ComposeProject[]>([])
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [update, setUpdate] = useState<Service | null>(null)
@@ -38,7 +47,12 @@ export default function AppsTab({ serverId, canWrite }: TabProps) {
     async (k: Kind, f: string, showSpinner: boolean) => {
       if (showSpinner) setBusy(true)
       try {
-        setServices(await api.services(serverId, k === 'all' ? '' : k, f))
+        const [svc, proj] = await Promise.all([
+          api.services(serverId, k === 'all' ? '' : k, f),
+          api.composeProjects(serverId),
+        ])
+        setServices(svc)
+        setProjects(proj ?? [])
         setError('')
       } catch (e) {
         setError(e instanceof ApiError ? e.message : t('err.network'))
@@ -54,23 +68,53 @@ export default function AppsTab({ serverId, canWrite }: TabProps) {
     return () => window.clearTimeout(id)
   }, [kind, filter, load])
 
-  // Group containers by their compose project; the group carries the root
-  // directory commands must run in.
+  // Merge two sources into one folder-centric view:
+  //   1. running containers, grouped by the compose working directory (folder),
+  //   2. compose folders discovered by scanning the host (even when stopped).
+  // Groups are keyed by their absolute directory so a container and its folder
+  // collapse into the same project card. Fallback to the compose project name
+  // when no directory was recorded on the container.
   const groups = useMemo<ComposeGroup[]>(() => {
     const map = new Map<string, ComposeGroup>()
+    const keyOf = (s: Service) => s.working_dir || (s.project ? `project:${s.project}` : '')
+
     for (const s of services ?? []) {
-      if (s.kind !== 'docker' || !s.project) continue
-      const g = map.get(s.project) ?? { name: s.project, dir: '', file: '', items: [] }
+      if (s.kind !== 'docker') continue
+      const key = keyOf(s)
+      if (!key) continue
+      const g =
+        map.get(key) ??
+        ({
+          key,
+          name: s.working_dir ? baseName(s.working_dir) : s.project || key,
+          dir: s.working_dir || '',
+          file: '',
+          project: s.project,
+          items: [],
+        } as ComposeGroup)
       g.items.push(s)
-      if (!g.dir && s.working_dir) g.dir = s.working_dir
       if (!g.file && s.compose_file) g.file = s.compose_file
-      map.set(s.project, g)
+      if (!g.project && s.project) g.project = s.project
+      map.set(key, g)
     }
+
+    for (const p of projects) {
+      const g =
+        map.get(p.dir) ??
+        ({ key: p.dir, name: p.name, dir: p.dir, file: '', items: [] } as ComposeGroup)
+      if (!g.file) g.file = p.file
+      if (!g.dir) g.dir = p.dir
+      map.set(p.dir, g)
+    }
+
     return [...map.values()].sort((a, b) => a.name.localeCompare(b.name))
-  }, [services])
+  }, [services, projects])
 
   const loose = useMemo(
-    () => (services ?? []).filter((s) => s.kind !== 'docker' || !s.project),
+    () =>
+      (services ?? []).filter(
+        (s) => s.kind !== 'docker' || !(s.working_dir || s.project),
+      ),
     [services],
   )
 
@@ -201,29 +245,50 @@ export default function AppsTab({ serverId, canWrite }: TabProps) {
       ) : (
         <div className="flex-col" style={{ gap: 16 }}>
           {groups.map((g) => (
-            <div className="card" key={g.name}>
+            <div className="card" key={g.key}>
               <div className="card-header">
                 <h3 className="mono">{g.name}</h3>
                 <Badge>{g.items.length}</Badge>
+                {g.project && g.project !== g.name ? <span className="chip">{g.project}</span> : null}
                 {g.dir ? <span className="chip">{g.dir}</span> : null}
                 <div className="spacer" />
-                <button className="btn btn-xs btn-primary" onClick={() => projectAction(g, 'up')} disabled={!canWrite}>
+                <button
+                  className="btn btn-xs btn-primary"
+                  onClick={() => projectAction(g, 'up')}
+                  disabled={!canWrite || !g.dir}
+                >
                   {t('apps.pullUp')}
                 </button>
-                <button className="btn btn-xs" onClick={() => projectAction(g, 'restart')} disabled={!canWrite}>
+                <button
+                  className="btn btn-xs"
+                  onClick={() => projectAction(g, 'restart')}
+                  disabled={!canWrite || !g.dir}
+                >
                   {t('apps.composeRestart')}
                 </button>
-                <button className="btn btn-xs" onClick={() => projectAction(g, 'logs')}>
+                <button className="btn btn-xs" onClick={() => projectAction(g, 'logs')} disabled={!g.dir}>
                   {t('apps.logs')}
                 </button>
-                <button className="btn btn-xs" onClick={() => projectAction(g, 'ps')}>
+                <button className="btn btn-xs" onClick={() => projectAction(g, 'ps')} disabled={!g.dir}>
                   {t('apps.ps')}
                 </button>
-                <button className="btn btn-xs btn-danger" onClick={() => projectAction(g, 'down')} disabled={!canWrite}>
+                <button
+                  className="btn btn-xs btn-danger"
+                  onClick={() => projectAction(g, 'down')}
+                  disabled={!canWrite || !g.dir}
+                >
                   {t('apps.down')}
                 </button>
               </div>
-              <div className="card-body tight">{serviceTable(g.items)}</div>
+              <div className="card-body tight">
+                {g.items.length > 0 ? (
+                  serviceTable(g.items)
+                ) : (
+                  <div className="fs-12 muted" style={{ padding: '14px 16px' }}>
+                    {t('apps.noContainers')}
+                  </div>
+                )}
+              </div>
             </div>
           ))}
 

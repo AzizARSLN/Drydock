@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"path"
+	"sort"
 	"strings"
 
 	"github.com/AzizARSLN/drydock/internal/sshx"
@@ -323,4 +324,46 @@ func resolveComposeDir(workingDir, composeFile string) (string, string, error) {
 		}
 	}
 	return cleanDir, file, nil
+}
+
+// composeScanRoots are the directories searched for compose files. Every entry
+// is part of DefaultFSScope so any discovered path already passes GuardPath.
+var composeScanRoots = []string{"/opt", "/srv", "/var/www", "/home", "/root"}
+
+// ListComposeProjects scans the host for compose files and returns one entry per
+// containing folder (the project root). This surfaces projects that are laid
+// out as folders on disk even when their containers are stopped or were never
+// started through the compose labels docker records.
+func ListComposeProjects(ctx context.Context, c *sshx.Client) ([]ComposeProject, error) {
+	if res, _ := c.Run(ctx, "command -v docker >/dev/null 2>&1 && echo yes"); strings.TrimSpace(res.Stdout) != "yes" {
+		return []ComposeProject{}, nil
+	}
+	quoted := make([]string, len(composeScanRoots))
+	for i, r := range composeScanRoots {
+		quoted[i] = shellQuote(r)
+	}
+	cmd := fmt.Sprintf(
+		`find %s -maxdepth 5 -type f \( -name docker-compose.yml -o -name docker-compose.yaml -o -name compose.yml -o -name compose.yaml \) 2>/dev/null`,
+		strings.Join(quoted, " "))
+	res, err := c.RunSudo(ctx, cmd)
+	if err != nil {
+		return nil, err
+	}
+
+	out := []ComposeProject{}
+	seen := map[string]bool{}
+	for _, line := range strings.Split(res.Stdout, "\n") {
+		file := strings.TrimSpace(line)
+		if file == "" || !strings.HasPrefix(file, "/") {
+			continue
+		}
+		dir := path.Dir(file)
+		if seen[dir] {
+			continue
+		}
+		seen[dir] = true
+		out = append(out, ComposeProject{Name: path.Base(dir), Dir: dir, File: file})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Dir < out[j].Dir })
+	return out, nil
 }

@@ -176,6 +176,7 @@ const dict = {
     'apps.down': 'Durdur (down)',
     'apps.stopConfirm': 'Durdurmak istediğinize emin misiniz?',
     'apps.compose': 'compose',
+    'apps.noContainers': 'Çalışan container yok — dizinde "Pull & Up" ile başlatabilirsiniz.',
     'apps.standalone': 'bağımsız',
 
     'ports.listening': 'Dinlenen portlar',
@@ -437,6 +438,7 @@ const dict = {
     'apps.down': 'Down (tear down)',
     'apps.stopConfirm': 'Are you sure you want to stop it?',
     'apps.compose': 'compose',
+    'apps.noContainers': 'No running containers — start it from this folder with "Pull & Up".',
     'apps.standalone': 'standalone',
 
     'ports.listening': 'Listening ports',

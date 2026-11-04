@@ -53,6 +53,16 @@ type Service struct {
 	ComposeFile string `json:"compose_file,omitempty"`
 }
 
+// ComposeProject is a docker compose project discovered by scanning the host
+// for compose files, whether or not any of its containers are currently
+// running. Name is the project folder name; Dir is that folder, which is where
+// project-level compose commands must run.
+type ComposeProject struct {
+	Name string `json:"name"`
+	Dir  string `json:"dir"`
+	File string `json:"file"`
+}
+
 // CertInfo describes an X.509 certificate found on the host.
 type CertInfo struct {
 	Domain    string `json:"domain"`
