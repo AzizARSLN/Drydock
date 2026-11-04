@@ -139,7 +139,7 @@ export default function NginxTab({ serverId, canWrite }: TabProps) {
                   <tr key={site.path}>
                     <td className="mono">{site.name}</td>
                     <td className="mono">{site.server_name || '—'}</td>
-                    <td className="mono">{site.listen.join(', ') || '—'}</td>
+                    <td className="mono">{(site.listen ?? []).join(', ') || '—'}</td>
                     <td>
                       {site.ssl ? <Badge kind="ok">SSL</Badge> : <span className="muted">—</span>}
                     </td>

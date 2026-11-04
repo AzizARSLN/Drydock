@@ -92,7 +92,10 @@ func ListNginxConfigs(ctx context.Context, c *sshx.Client) ([]NginxSite, error) 
 }
 
 func buildSite(name, p string, enabled bool, content string) NginxSite {
-	s := NginxSite{Name: name, Path: p, Enabled: enabled}
+	// Listen is initialized so the JSON payload always carries an array rather
+	// than null, keeping the frontend contract stable for sites without a
+	// listen directive.
+	s := NginxSite{Name: name, Path: p, Enabled: enabled, Listen: []string{}}
 	if m := reServerName.FindStringSubmatch(content); m != nil {
 		s.ServerName = strings.Join(strings.Fields(m[1]), ", ")
 	}
