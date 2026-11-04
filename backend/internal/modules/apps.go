@@ -3,6 +3,7 @@ package modules
 import (
 	"context"
 	"fmt"
+	"path"
 	"strings"
 
 	"github.com/AzizARSLN/drydock/internal/sshx"
@@ -45,7 +46,7 @@ func listDocker(ctx context.Context, c *sshx.Client) ([]Service, error) {
 	if res, _ := c.Run(ctx, "command -v docker >/dev/null 2>&1 && echo yes"); strings.TrimSpace(res.Stdout) != "yes" {
 		return nil, nil
 	}
-	format := `{{.Names}}\t{{.Image}}\t{{.Status}}\t{{.RunningFor}}\t{{.Label "com.docker.compose.project.config_files"}}\t{{.Label "com.docker.compose.service"}}`
+	format := `{{.Names}}\t{{.Image}}\t{{.Status}}\t{{.RunningFor}}\t{{.Label "com.docker.compose.project"}}\t{{.Label "com.docker.compose.service"}}\t{{.Label "com.docker.compose.project.working_dir"}}\t{{.Label "com.docker.compose.project.config_files"}}`
 	res, err := c.RunSudo(ctx, "docker ps --format '"+format+"' 2>/dev/null")
 	if err != nil {
 		return nil, err
@@ -57,20 +58,33 @@ func listDocker(ctx context.Context, c *sshx.Client) ([]Service, error) {
 			continue
 		}
 		f := strings.Split(line, "\t")
-		for len(f) < 6 {
+		for len(f) < 8 {
 			f = append(f, "")
 		}
 		out = append(out, Service{
-			Name:    f[0],
-			Kind:    "docker",
-			Status:  f[2],
-			Image:   f[1],
-			Version: imageTag(f[1]),
-			Uptime:  f[3],
-			Detail:  composeDetail(f[4], f[5]),
+			Name:        f[0],
+			Kind:        "docker",
+			Status:      f[2],
+			Image:       f[1],
+			Version:     imageTag(f[1]),
+			Uptime:      f[3],
+			Detail:      composeDetail(f[7], f[5]),
+			Project:     f[4],
+			ComposeSvc:  f[5],
+			WorkingDir:  f[6],
+			ComposeFile: firstComposeFile(f[7]),
 		})
 	}
 	return out, nil
+}
+
+// firstComposeFile returns the first entry of the comma separated config_files
+// label that compose records on every container.
+func firstComposeFile(files string) string {
+	if i := strings.Index(files, ","); i >= 0 {
+		files = files[:i]
+	}
+	return strings.TrimSpace(files)
 }
 
 func imageTag(image string) string {
@@ -234,4 +248,79 @@ func detectPackageManager(ctx context.Context, c *sshx.Client) string {
 	res, _ := c.Run(ctx,
 		`if command -v apt-get >/dev/null 2>&1; then echo apt; elif command -v dnf >/dev/null 2>&1; then echo dnf; elif command -v yum >/dev/null 2>&1; then echo yum; elif command -v apk >/dev/null 2>&1; then echo apk; else echo none; fi`)
 	return strings.TrimSpace(res.Stdout)
+}
+
+// composeActions maps the project-level actions the UI can trigger to the
+// docker compose subcommands they expand to, run in order.
+var composeActions = map[string][]string{
+	"up":      {"pull", "up -d"},
+	"restart": {"restart"},
+	"down":    {"down"},
+	"ps":      {"ps"},
+	"logs":    {"logs --tail=200"},
+}
+
+// ComposeProjectAction runs a docker compose subcommand inside the project's
+// root directory — the working directory recorded on the containers, which is
+// exactly where the project must be pulled and (re)started. The directory is
+// validated against the filesystem scope before any command runs.
+func ComposeProjectAction(ctx context.Context, c *sshx.Client, workingDir, composeFile, action string, dryRun bool) (*Outcome, error) {
+	subs, ok := composeActions[action]
+	if !ok {
+		return nil, fmt.Errorf("unsupported compose action %q", action)
+	}
+	dir, file, err := resolveComposeDir(workingDir, composeFile)
+	if err != nil {
+		return nil, err
+	}
+
+	base := "docker compose"
+	if file != "" {
+		base += " -f " + shellQuote(file)
+	}
+	parts := make([]string, len(subs))
+	for i, s := range subs {
+		parts[i] = base + " " + s
+	}
+	cmd := fmt.Sprintf("cd %s && %s", shellQuote(dir), strings.Join(parts, " && "))
+
+	out := &Outcome{DryRun: dryRun, Commands: []string{cmd}}
+	if dryRun {
+		out.Message = fmt.Sprintf("Dry-run: %s dizininde 'docker compose %s' çalıştırılacak.", dir, strings.Join(subs, " && "))
+		return out, nil
+	}
+	res, err := c.RunSudo(ctx, cmd)
+	if err != nil {
+		return nil, err
+	}
+	out.Output = strings.TrimSpace(res.Stdout + res.Stderr)
+	if !res.OK() {
+		return out, fmt.Errorf("docker compose %s başarısız: %s", action, out.Output)
+	}
+	out.Message = fmt.Sprintf("%s dizininde 'docker compose %s' tamamlandı.", dir, strings.Join(subs, " && "))
+	return out, nil
+}
+
+// resolveComposeDir determines and guards the project root and, when the
+// recorded config file is also inside the permitted scope, returns it so the
+// command can pin the exact compose file.
+func resolveComposeDir(workingDir, composeFile string) (string, string, error) {
+	dir := strings.TrimSpace(workingDir)
+	if dir == "" && composeFile != "" {
+		dir = path.Dir(composeFile)
+	}
+	if dir == "" {
+		return "", "", fmt.Errorf("proje kök dizini bilinmiyor")
+	}
+	cleanDir, err := GuardPath(dir, DefaultFSScope)
+	if err != nil {
+		return "", "", err
+	}
+	file := ""
+	if composeFile != "" {
+		if cf, err := GuardPath(composeFile, DefaultFSScope); err == nil {
+			file = cf
+		}
+	}
+	return cleanDir, file, nil
 }

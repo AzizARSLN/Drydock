@@ -312,6 +312,36 @@ func (s *Server) handleServiceUpdate(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, out)
 }
 
+// handleComposeAction runs a project-level docker compose command in the
+// project's root directory (pull / up -d / restart / down / ps / logs).
+func (s *Server) handleComposeAction(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		WorkingDir  string `json:"working_dir"`
+		ComposeFile string `json:"compose_file"`
+		Action      string `json:"action"`
+		DryRun      bool   `json:"dry_run"`
+	}
+	if err := decode(r, &in); err != nil {
+		fail(w, http.StatusBadRequest, "geçersiz istek gövdesi")
+		return
+	}
+	client, sv, ctx, cancel, ok := s.dial(w, r, 300*time.Second)
+	if !ok {
+		return
+	}
+	defer cancel()
+	defer client.Close()
+
+	out, err := modules.ComposeProjectAction(ctx, client, in.WorkingDir, in.ComposeFile, in.Action, in.DryRun)
+	if err != nil {
+		s.audit(r, sv.ID, sv.Name, "compose-"+in.Action, in.WorkingDir, err.Error(), audit.StatusError)
+		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"error": err.Error(), "outcome": out})
+		return
+	}
+	s.audit(r, sv.ID, sv.Name, "compose-"+in.Action, in.WorkingDir, out.Message, statusFor(in.DryRun))
+	writeJSON(w, http.StatusOK, out)
+}
+
 // --- Ports -----------------------------------------------------------------
 
 func (s *Server) handlePorts(w http.ResponseWriter, r *http.Request) {

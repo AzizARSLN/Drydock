@@ -25,13 +25,13 @@ type Job struct {
 
 // NginxSite describes a single served site configuration.
 type NginxSite struct {
-	Name     string `json:"name"`
-	Path     string `json:"path"`
-	Enabled  bool   `json:"enabled"`
-	ServerName string `json:"server_name"`
-	Listen   []string `json:"listen"`
-	SSL      bool   `json:"ssl"`
-	CertPath string `json:"cert_path"`
+	Name       string   `json:"name"`
+	Path       string   `json:"path"`
+	Enabled    bool     `json:"enabled"`
+	ServerName string   `json:"server_name"`
+	Listen     []string `json:"listen"`
+	SSL        bool     `json:"ssl"`
+	CertPath   string   `json:"cert_path"`
 }
 
 // Service is a managed process exposed by docker or systemd.
@@ -43,6 +43,14 @@ type Service struct {
 	Version string `json:"version"`
 	Uptime  string `json:"uptime"`
 	Detail  string `json:"detail"`
+
+	// Compose metadata, populated only for containers started through docker
+	// compose. WorkingDir is the directory the project was launched from and
+	// therefore where project-level compose commands must run.
+	Project     string `json:"project,omitempty"`
+	ComposeSvc  string `json:"compose_service,omitempty"`
+	WorkingDir  string `json:"working_dir,omitempty"`
+	ComposeFile string `json:"compose_file,omitempty"`
 }
 
 // CertInfo describes an X.509 certificate found on the host.
@@ -67,24 +75,24 @@ type DiskMount struct {
 
 // HealthReport is the aggregated state of a managed host.
 type HealthReport struct {
-	ServerID   int64       `json:"server_id"`
-	Reachable  bool        `json:"reachable"`
-	Hostname   string      `json:"hostname"`
-	OS         string      `json:"os"`
-	Kernel     string      `json:"kernel"`
-	Uptime     string      `json:"uptime"`
-	LoadAvg    string      `json:"load_avg"`
-	CPUPercent float64     `json:"cpu_percent"`
-	MemTotalMB float64     `json:"mem_total_mb"`
-	MemUsedMB  float64     `json:"mem_used_mb"`
-	MemPercent float64     `json:"mem_percent"`
-	Disks      []DiskMount `json:"disks"`
-	NginxState string      `json:"nginx_state"`
-	DockerOn   bool        `json:"docker_on"`
-	FailedUnits []string   `json:"failed_units"`
-	CertExpiring []CertInfo `json:"cert_expiring"`
-	CheckedAt  string      `json:"checked_at"`
-	Error      string      `json:"error,omitempty"`
+	ServerID     int64       `json:"server_id"`
+	Reachable    bool        `json:"reachable"`
+	Hostname     string      `json:"hostname"`
+	OS           string      `json:"os"`
+	Kernel       string      `json:"kernel"`
+	Uptime       string      `json:"uptime"`
+	LoadAvg      string      `json:"load_avg"`
+	CPUPercent   float64     `json:"cpu_percent"`
+	MemTotalMB   float64     `json:"mem_total_mb"`
+	MemUsedMB    float64     `json:"mem_used_mb"`
+	MemPercent   float64     `json:"mem_percent"`
+	Disks        []DiskMount `json:"disks"`
+	NginxState   string      `json:"nginx_state"`
+	DockerOn     bool        `json:"docker_on"`
+	FailedUnits  []string    `json:"failed_units"`
+	CertExpiring []CertInfo  `json:"cert_expiring"`
+	CheckedAt    string      `json:"checked_at"`
+	Error        string      `json:"error,omitempty"`
 }
 
 // ListeningPort is a socket bound on the host.

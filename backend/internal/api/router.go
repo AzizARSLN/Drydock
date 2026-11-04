@@ -62,6 +62,7 @@ func (s *Server) Routes(webDir string) http.Handler {
 	mux.Handle("GET /api/servers/{id}/services", authed(s.handleServices))
 	mux.Handle("POST /api/servers/{id}/services/action", operator(s.handleServiceAction))
 	mux.Handle("POST /api/servers/{id}/services/update", operator(s.handleServiceUpdate))
+	mux.Handle("POST /api/servers/{id}/services/compose", operator(s.handleComposeAction))
 
 	// --- Ports ------------------------------------------------------------
 	mux.Handle("GET /api/servers/{id}/ports", authed(s.handlePorts))

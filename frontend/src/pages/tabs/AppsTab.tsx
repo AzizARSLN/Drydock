@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { api, ApiError, type Service } from '../../api'
 import { useDryRun } from '../../components/DryRun'
 import { Modal } from '../../components/Modal'
@@ -7,6 +7,7 @@ import { useI18n } from '../../i18n'
 import type { TabProps } from '../ServerDetail'
 
 type Kind = 'all' | 'docker' | 'systemd'
+type View = 'service' | 'project'
 
 // composePath extracts the compose file from the "compose: <file> (<service>)"
 // detail string produced by the backend listing.
@@ -15,10 +16,18 @@ function composePath(detail: string): string {
   return m ? m[1] : ''
 }
 
+interface ComposeGroup {
+  name: string
+  dir: string
+  file: string
+  items: Service[]
+}
+
 export default function AppsTab({ serverId, canWrite }: TabProps) {
   const { t } = useI18n()
   const dry = useDryRun()
   const [kind, setKind] = useState<Kind>('all')
+  const [view, setView] = useState<View>('project')
   const [filter, setFilter] = useState('')
   const [services, setServices] = useState<Service[] | null>(null)
   const [busy, setBusy] = useState(false)
@@ -45,10 +54,40 @@ export default function AppsTab({ serverId, canWrite }: TabProps) {
     return () => window.clearTimeout(id)
   }, [kind, filter, load])
 
+  // Group containers by their compose project; the group carries the root
+  // directory commands must run in.
+  const groups = useMemo<ComposeGroup[]>(() => {
+    const map = new Map<string, ComposeGroup>()
+    for (const s of services ?? []) {
+      if (s.kind !== 'docker' || !s.project) continue
+      const g = map.get(s.project) ?? { name: s.project, dir: '', file: '', items: [] }
+      g.items.push(s)
+      if (!g.dir && s.working_dir) g.dir = s.working_dir
+      if (!g.file && s.compose_file) g.file = s.compose_file
+      map.set(s.project, g)
+    }
+    return [...map.values()].sort((a, b) => a.name.localeCompare(b.name))
+  }, [services])
+
+  const loose = useMemo(
+    () => (services ?? []).filter((s) => s.kind !== 'docker' || !s.project),
+    [services],
+  )
+
   const action = (svc: Service, act: string) => {
     dry.preview({
       title: `${svc.name} — ${act}`,
       run: (d) => api.serviceAction(serverId, svc.kind, svc.name, act, d),
+      onApplied: () => void load(kind, filter, false),
+    })
+  }
+
+  const projectAction = (g: ComposeGroup, act: string) => {
+    dry.preview({
+      title: `${g.name} — docker compose ${act}`,
+      // "down" tears the project down, so it must be confirmed by name.
+      confirmWord: act === 'down' ? g.name : undefined,
+      run: (d) => api.composeAction(serverId, g.dir, g.file, act, d),
       onApplied: () => void load(kind, filter, false),
     })
   }
@@ -58,13 +97,65 @@ export default function AppsTab({ serverId, canWrite }: TabProps) {
     const svc = update
     dry.preview({
       title: `${t('apps.update')} — ${svc.name}`,
-      run: (d) => api.serviceUpdate(serverId, svc.kind, svc.name, svc.image, composePath(svc.detail), d),
+      run: (d) =>
+        api.serviceUpdate(serverId, svc.kind, svc.name, svc.image, svc.compose_file || composePath(svc.detail), d),
       onApplied: () => {
         setUpdate(null)
         void load(kind, filter, false)
       },
     })
   }
+
+  const serviceTable = (items: Service[]) => (
+    <div className="table-wrap">
+      <table className="table">
+        <thead>
+          <tr>
+            <th>{t('common.name')}</th>
+            <th>{t('apps.kind')}</th>
+            <th>{t('apps.image')}</th>
+            <th>{t('apps.version')}</th>
+            <th>{t('common.status')}</th>
+            <th className="right">{t('common.actions')}</th>
+          </tr>
+        </thead>
+        <tbody>
+          {items.map((svc) => (
+            <tr key={`${svc.kind}-${svc.name}`}>
+              <td className="mono">{svc.compose_service || svc.name}</td>
+              <td>
+                <Badge kind={svc.kind === 'docker' ? 'info' : ''}>{svc.kind}</Badge>
+              </td>
+              <td className="mono fs-11">{svc.image || '—'}</td>
+              <td className="mono fs-11">{svc.version || '—'}</td>
+              <td className="fs-11">{svc.status || '—'}</td>
+              <td className="right">
+                <div className="flex" style={{ justifyContent: 'flex-end' }}>
+                  <button className="btn btn-xs" onClick={() => action(svc, 'start')} disabled={!canWrite}>
+                    {t('apps.start')}
+                  </button>
+                  <button className="btn btn-xs" onClick={() => action(svc, 'stop')} disabled={!canWrite}>
+                    {t('apps.stop')}
+                  </button>
+                  <button className="btn btn-xs" onClick={() => action(svc, 'restart')} disabled={!canWrite}>
+                    {t('apps.restart')}
+                  </button>
+                  {svc.kind === 'systemd' ? (
+                    <button className="btn btn-xs" onClick={() => action(svc, 'reload')} disabled={!canWrite}>
+                      {t('apps.reload')}
+                    </button>
+                  ) : null}
+                  <button className="btn btn-xs btn-primary" onClick={() => setUpdate(svc)} disabled={!canWrite}>
+                    {t('apps.update')}
+                  </button>
+                </div>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )
 
   return (
     <>
@@ -76,9 +167,16 @@ export default function AppsTab({ serverId, canWrite }: TabProps) {
             </button>
           ))}
         </div>
+        <div className="toggle">
+          {(['project', 'service'] as View[]).map((v) => (
+            <button key={v} className={view === v ? 'active' : ''} onClick={() => setView(v)}>
+              {v === 'project' ? t('apps.byProject') : t('apps.byService')}
+            </button>
+          ))}
+        </div>
         <input
           className="input"
-          style={{ maxWidth: 260 }}
+          style={{ maxWidth: 240 }}
           placeholder={t('apps.filter')}
           value={filter}
           onChange={(e) => setFilter(e.target.value)}
@@ -98,56 +196,46 @@ export default function AppsTab({ serverId, canWrite }: TabProps) {
         <div className="card">
           <Empty title={t('apps.empty')} />
         </div>
+      ) : view === 'service' ? (
+        <div className="card">{serviceTable(services)}</div>
       ) : (
-        <div className="card">
-          <div className="table-wrap">
-            <table className="table">
-              <thead>
-                <tr>
-                  <th>{t('common.name')}</th>
-                  <th>{t('apps.kind')}</th>
-                  <th>{t('apps.image')}</th>
-                  <th>{t('apps.version')}</th>
-                  <th>{t('common.status')}</th>
-                  <th className="right">{t('common.actions')}</th>
-                </tr>
-              </thead>
-              <tbody>
-                {services.map((svc) => (
-                  <tr key={`${svc.kind}-${svc.name}`}>
-                    <td className="mono">{svc.name}</td>
-                    <td>
-                      <Badge kind={svc.kind === 'docker' ? 'info' : ''}>{svc.kind}</Badge>
-                    </td>
-                    <td className="mono fs-11">{svc.image || '—'}</td>
-                    <td className="mono fs-11">{svc.version || '—'}</td>
-                    <td className="fs-11">{svc.status || '—'}</td>
-                    <td className="right">
-                      <div className="flex" style={{ justifyContent: 'flex-end' }}>
-                        <button className="btn btn-xs" onClick={() => action(svc, 'start')} disabled={!canWrite}>
-                          {t('apps.start')}
-                        </button>
-                        <button className="btn btn-xs" onClick={() => action(svc, 'stop')} disabled={!canWrite}>
-                          {t('apps.stop')}
-                        </button>
-                        <button className="btn btn-xs" onClick={() => action(svc, 'restart')} disabled={!canWrite}>
-                          {t('apps.restart')}
-                        </button>
-                        {svc.kind === 'systemd' ? (
-                          <button className="btn btn-xs" onClick={() => action(svc, 'reload')} disabled={!canWrite}>
-                            {t('apps.reload')}
-                          </button>
-                        ) : null}
-                        <button className="btn btn-xs btn-primary" onClick={() => setUpdate(svc)} disabled={!canWrite}>
-                          {t('apps.update')}
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+        <div className="flex-col" style={{ gap: 16 }}>
+          {groups.map((g) => (
+            <div className="card" key={g.name}>
+              <div className="card-header">
+                <h3 className="mono">{g.name}</h3>
+                <Badge>{g.items.length}</Badge>
+                {g.dir ? <span className="chip">{g.dir}</span> : null}
+                <div className="spacer" />
+                <button className="btn btn-xs btn-primary" onClick={() => projectAction(g, 'up')} disabled={!canWrite}>
+                  {t('apps.pullUp')}
+                </button>
+                <button className="btn btn-xs" onClick={() => projectAction(g, 'restart')} disabled={!canWrite}>
+                  {t('apps.composeRestart')}
+                </button>
+                <button className="btn btn-xs" onClick={() => projectAction(g, 'logs')}>
+                  {t('apps.logs')}
+                </button>
+                <button className="btn btn-xs" onClick={() => projectAction(g, 'ps')}>
+                  {t('apps.ps')}
+                </button>
+                <button className="btn btn-xs btn-danger" onClick={() => projectAction(g, 'down')} disabled={!canWrite}>
+                  {t('apps.down')}
+                </button>
+              </div>
+              <div className="card-body tight">{serviceTable(g.items)}</div>
+            </div>
+          ))}
+
+          {loose.length > 0 ? (
+            <div className="card">
+              <div className="card-header">
+                <h3>{t('apps.standalone')}</h3>
+                <Badge>{loose.length}</Badge>
+              </div>
+              <div className="card-body tight">{serviceTable(loose)}</div>
+            </div>
+          ) : null}
         </div>
       )}
 

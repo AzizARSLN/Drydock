@@ -82,6 +82,11 @@ export interface Service {
   version: string
   uptime: string
   detail: string
+  // Present only for containers launched through docker compose.
+  project?: string
+  compose_service?: string
+  working_dir?: string
+  compose_file?: string
 }
 
 export interface ListeningPort {
@@ -231,6 +236,13 @@ export const api = {
     request<Outcome>('POST', `/api/servers/${id}/services/action`, { kind, name, action, dry_run }),
   serviceUpdate: (id: number, kind: string, name: string, image: string, compose_file: string, dry_run: boolean) =>
     request<Outcome>('POST', `/api/servers/${id}/services/update`, { kind, name, image, compose_file, dry_run }),
+  composeAction: (
+    id: number,
+    working_dir: string,
+    compose_file: string,
+    action: string,
+    dry_run: boolean,
+  ) => request<Outcome>('POST', `/api/servers/${id}/services/compose`, { working_dir, compose_file, action, dry_run }),
 
   ports: (id: number) => request<ListeningPort[]>('GET', `/api/servers/${id}/ports`),
   portChange: (id: number, path: string, old_port: number, new_port: number, dry_run: boolean) =>
