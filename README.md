@@ -174,6 +174,19 @@ cd backend  && go run .          # http://127.0.0.1:8788
 cd frontend && npm run dev        # http://127.0.0.1:5173  (hot reload)
 ```
 
+### Lost the administrator password?
+
+There is no default account: the first admin is created by you on the setup
+screen, and the password is stored only as a bcrypt hash. If you forget it,
+reset it from the host that holds the database — the prompt never echoes:
+
+```bash
+cd backend && go run . reset-password <username>
+
+# non-interactive (CI, provisioning scripts):
+DRYDOCK_NEW_PASSWORD='...' go run . reset-password <username>
+```
+
 ---
 
 ## Configuration
