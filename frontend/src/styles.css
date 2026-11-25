@@ -43,8 +43,9 @@
   --diff-hunk-fg: #79c0ff;
 
   --panel-translucent: rgba(17, 24, 35, 0.92);
-  --auth-overlay-top: rgba(5, 8, 12, 0.72);
-  --auth-overlay-bottom: rgba(5, 8, 12, 0.94);
+  --auth-glow: rgba(76, 141, 255, 0.18);
+  --auth-glow-2: rgba(88, 101, 242, 0.12);
+  --auth-grid: rgba(120, 152, 196, 0.08);
   --backdrop: rgba(4, 7, 10, 0.72);
   --scroll-thumb: #2b3646;
   --scroll-thumb-hover: #37455a;
@@ -99,8 +100,9 @@
   --diff-hunk-fg: #0969da;
 
   --panel-translucent: rgba(255, 255, 255, 0.92);
-  --auth-overlay-top: rgba(244, 246, 250, 0.82);
-  --auth-overlay-bottom: rgba(244, 246, 250, 0.96);
+  --auth-glow: rgba(47, 111, 235, 0.12);
+  --auth-glow-2: rgba(88, 101, 242, 0.09);
+  --auth-grid: rgba(60, 90, 140, 0.07);
   --backdrop: rgba(23, 31, 44, 0.4);
   --scroll-thumb: #c6d0dd;
   --scroll-thumb-hover: #aab7c7;
@@ -404,23 +406,35 @@ p { margin: 0; }
   position: relative; overflow: hidden;
   background: var(--bg-0);
 }
+/* Backdrop is drawn entirely in CSS: a soft accent glow over a fine technical
+   grid, faded out towards the edges. No external assets, so the login screen
+   also renders correctly on air-gapped hosts. */
 .auth-bg {
-  position: absolute; inset: 0;
+  position: absolute; inset: 0; pointer-events: none;
   background-image:
-    linear-gradient(180deg, var(--auth-overlay-top) 0%, var(--auth-overlay-bottom) 100%),
-    url('https://coresg-normal.trae.ai/api/ide/v1/text_to_image?prompt=data%20center%20server%20room%2C%20rows%20of%20server%20racks%20with%20soft%20blue%20LED%20lights%2C%20shallow%20depth%20of%20field%2C%20clean%20professional%20lighting%2C%20neutral%20tones%2C%20blurred%20background&image_size=landscape_16_9');
-  background-size: cover; background-position: center;
-  opacity: 0.5;
+    radial-gradient(58% 52% at 16% 8%, var(--auth-glow) 0%, transparent 62%),
+    radial-gradient(52% 48% at 86% 92%, var(--auth-glow-2) 0%, transparent 64%),
+    linear-gradient(var(--auth-grid) 1px, transparent 1px),
+    linear-gradient(90deg, var(--auth-grid) 1px, transparent 1px);
+  background-size: 100% 100%, 100% 100%, 44px 44px, 44px 44px;
+  -webkit-mask-image: radial-gradient(130% 105% at 50% 38%, #000 42%, transparent 100%);
+  mask-image: radial-gradient(130% 105% at 50% 38%, #000 42%, transparent 100%);
 }
-[data-theme='light'] .auth-bg { opacity: 0.35; }
 .auth-card {
   position: relative; z-index: 1;
   width: 100%; max-width: 400px;
   background: var(--panel-translucent);
   border: 1px solid var(--border);
-  border-radius: 14px; padding: 28px;
+  border-radius: 16px; padding: 30px 28px 26px;
   box-shadow: var(--shadow);
-  backdrop-filter: blur(10px);
+  backdrop-filter: blur(14px) saturate(120%);
+  -webkit-backdrop-filter: blur(14px) saturate(120%);
+  overflow: hidden;
+}
+.auth-card::before {
+  content: ''; position: absolute; inset: 0 0 auto 0; height: 2px;
+  background: linear-gradient(90deg, transparent, var(--accent), transparent);
+  opacity: 0.75;
 }
 .auth-tools { display: flex; align-items: center; justify-content: center; gap: 10px; margin-bottom: 20px; }
 .auth-head { text-align: center; margin-bottom: 22px; }
